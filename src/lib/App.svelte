@@ -43,6 +43,7 @@
       id: 3,
     },
   ]);
+  let nextID = 4;
 
   let selectedShape = $state(null);
   let selectedNode = null;
@@ -441,8 +442,36 @@
     };
     img.src = url;
   }
+
+  let dragSrcIndex = null;
+
+  function handleDragStart(event, index) {
+    dragSrcIndex = index;
+    event.dataTransfer.effectAllowed = "move";
+    // Optional: show ghost preview
+    event.dataTransfer.setData("text/plain", index);
+  }
+
+  function handleDragOver(event, index) {
+    event.preventDefault(); // Allow dropping
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function handleDrop(event, index) {
+    event.preventDefault();
+    const from = dragSrcIndex;
+    const to = index;
+    if (from === null || from === to) return;
+
+    const moved = shapes.splice(from, 1)[0];
+    shapes.splice(to, 0, moved);
+
+    dragSrcIndex = null;
+  }
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="wrapper">
   <div class="bar">
     <p>Tools</p>
@@ -472,9 +501,10 @@
             { x: 75, y: 75, type: "rect" },
             { x: 25, y: 75, type: "rect" },
           ],
-          id: shapes.length,
+          id: nextID,
         });
         syncHandles();
+        nextID++;
       }}>New Square</button
     >
     <button
@@ -510,8 +540,6 @@
     <button onclick={downloadSVG}>SVG</button>
   </div>
 
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <svg
     bind:this={svgEl}
     width="800"
@@ -622,4 +650,40 @@
       {/each}
     {/if}
   </svg>
+
+  <div class="bar">
+    {#each shapes as shape, i (shape.id)}
+      <div
+        class={selectedShape === shape
+          ? "shape-preview selected"
+          : "shape-preview"}
+        draggable="true"
+        ondragstart={(e) => handleDragStart(e, i)}
+        ondragover={(e) => handleDragOver(e, i)}
+        ondrop={(e) => handleDrop(e, i)}
+      >
+        {#key shape.id}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            preserveAspectRatio="xMidYMid meet"
+            width="100%"
+            height="100%"
+            viewBox={`${getBoundingBox(shape).xMin} ${getBoundingBox(shape).yMin} ${getBoundingBox(shape).width} ${getBoundingBox(shape).height}`}
+            onmousedown={() => {
+              selectedShape = shape;
+              selectedNode = null;
+              selectedHandle = null;
+            }}
+          >
+            <path
+              d={pathD(shape)}
+              fill={colorFromID(shape.id, true)}
+              stroke={colorFromID(shape.id)}
+              stroke-width="2"
+            />
+          </svg>
+        {/key}
+      </div>
+    {/each}
+  </div>
 </div>

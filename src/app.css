@@ -8,7 +8,7 @@ p {
   text-align: center;
 }
 
-svg {
+svg[role="application"] {
   background-color: #fff;
   background-image: linear-gradient(
       45deg,
@@ -32,13 +32,13 @@ svg {
   touch-action: none;
 }
 
-svg path,
-svg circle {
+svg[role="application"] path,
+svg[role="application"] circle {
   cursor: grab;
 }
 
-svg path:active,
-svg circle:active {
+svg[role="application"] path:active,
+svg[role="application"] circle:active {
   cursor: grabbing;
 }
 
@@ -52,6 +52,28 @@ div.bar {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+div.shape-preview {
+  width: 4rem;
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #ccc;
+  touch-action: none;
+  overflow: hidden;
+}
+
+div.shape-preview.selected {
+  border: 2px dashed #4a92ff;
+}
+
+div.shape-preview svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: pointer;
 }
 
 svg .wb:not(line) {
