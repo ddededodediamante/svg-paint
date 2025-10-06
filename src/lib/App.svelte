@@ -447,7 +447,10 @@
         }
 
         let index = shapes.findIndex((s) => s.id === selectedShape.id);
-        if (index !== -1) shapes.splice(index, 1);
+        if (index !== -1) {
+          shapes.splice(index, 1);
+          selectedShape = null;
+        }
       }}>Delete</button
     >
     <p>Shapes</p>
