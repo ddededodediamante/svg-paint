@@ -395,11 +395,11 @@
       `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
     );
 
-    return clone;
+    return { element: clone, bbox };
   }
 
   function downloadSVG() {
-    const clone = cloneSvgEl();
+    const clone = cloneSvgEl().element;
 
     const serializer = new XMLSerializer();
     const source = serializer.serializeToString(clone);
@@ -416,7 +416,7 @@
   }
 
   function downloadPNG() {
-    const clone = cloneSvgEl();
+    const { element: clone, bbox } = cloneSvgEl();
 
     const serializer = new XMLSerializer();
     const source = serializer.serializeToString(clone);
@@ -427,10 +427,10 @@
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement("canvas");
-      canvas.width = svgEl.clientWidth;
-      canvas.height = svgEl.clientHeight;
+      canvas.width = bbox.width;
+      canvas.height = bbox.height;
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, bbox.width, bbox.height);
 
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png");
