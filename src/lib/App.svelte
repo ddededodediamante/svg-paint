@@ -383,11 +383,23 @@
     }
   }
 
-  function downloadSVG() {
+  function cloneSvgEl() {
     const clone = svgEl.cloneNode(true);
-    clone
-      .querySelectorAll(".wb")
-      .forEach((/** @type {{ remove: () => any; }} */ el) => el.remove());
+    clone.querySelectorAll(".wb").forEach((el) => el.remove());
+
+    const bbox = svgEl.getBBox();
+    clone.setAttribute("width", bbox.width);
+    clone.setAttribute("height", bbox.height);
+    clone.setAttribute(
+      "viewBox",
+      `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
+    );
+
+    return clone;
+  }
+
+  function downloadSVG() {
+    const clone = cloneSvgEl();
 
     const serializer = new XMLSerializer();
     const source = serializer.serializeToString(clone);
@@ -404,15 +416,13 @@
   }
 
   function downloadPNG() {
-    const clone = svgEl.cloneNode(true);
-    clone
-      .querySelectorAll(".wb")
-      .forEach((/** @type {{ remove: () => any; }} */ el) => el.remove());
+    const clone = cloneSvgEl();
 
     const serializer = new XMLSerializer();
     const source = serializer.serializeToString(clone);
-    const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
+
+    const blob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
 
     const img = new Image();
     img.onload = () => {
@@ -422,9 +432,8 @@
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0);
 
-      const pngUrl = canvas.toDataURL("image/png");
       const a = document.createElement("a");
-      a.href = pngUrl;
+      a.href = canvas.toDataURL("image/png");
       a.download = "image.png";
       a.click();
 
