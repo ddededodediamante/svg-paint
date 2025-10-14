@@ -1,35 +1,118 @@
+* {
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light dark;
+  --background: light-dark(#fff, #222329);
+  --foreground: light-dark(#ddd, #2f3038);
+  --dark: light-dark(#000, #fff);
+  --alpha-6-background: light-dark(
+    rgba(221, 221, 221, 0.6),
+    rgba(47, 48, 56, 0.6)
+  );
+  --alpha-8-background: light-dark(
+    rgba(221, 221, 221, 0.8),
+    rgba(47, 48, 56, 0.8)
+  );
+  --alpha-8-dark: light-dark(rgba(0, 0, 0, 0.8), rgba(255, 255, 255, 0.8));
+  --alpha-2-dark: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+}
+
 body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
 }
 
+body,
+div#app {
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--background);
+}
+
+div#app {
+  position: relative;
+  overflow: hidden;
+}
+
 p {
-  margin: 0;
   text-align: center;
 }
 
+button {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--background);
+  border: 1px solid var(--alpha-2-dark);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.9rem;
+  gap: 0.4rem;
+  transition: transform 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
+}
+
+button:hover {
+  background: var(--foreground);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:has(img:only-child), button:has(svg:only-child) {
+  padding: 0.4rem;
+}
+
+button img:only-child, button svg:only-child {
+  fill: light-dark(#000, #fff);
+  width: 2rem;
+  height: 2rem;
+}
+
+:disabled {
+  pointer-events: none;
+  color: initial;
+  opacity: 0.5;
+}
+
 svg[role="application"] {
-  background-color: #fff;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 100vw;
+  max-height: 100vh;
+  width: auto;
+  height: auto;
+  background-color: var(--background);
   background-image: linear-gradient(
       45deg,
-      #eee 25%,
+      var(--foreground) 25%,
       transparent 25%,
       transparent 75%,
-      #eee 75%,
-      #eee
+      var(--foreground) 75%,
+      var(--foreground)
     ),
     linear-gradient(
       45deg,
-      #eee 25%,
+      var(--foreground) 25%,
       transparent 25%,
       transparent 75%,
-      #eee 75%,
-      #eee
+      var(--foreground) 75%,
+      var(--foreground)
     );
   background-size: 40px 40px;
   background-position: 0 0, 20px 20px;
-  border: 2px solid #ccc;
+  border: none;
   touch-action: none;
+  z-index: 0;
 }
 
 svg[role="application"] path,
@@ -44,14 +127,54 @@ svg[role="application"] circle:active {
 
 div.wrapper {
   display: flex;
-  flex-direction: row;
+  position: fixed;
+  justify-content: center;
+  align-items: center;
+  background: var(--alpha-6-background);
+  border-radius: 8px;
+  padding: 0.5rem;
+  z-index: 10;
   gap: 0.5rem;
+  transition: background-color 0.2s ease;
+  will-change: background-color;
 }
 
-div.bar {
-  display: flex;
+div.wrapper:hover {
+  background: var(--alpha-8-background);
+}
+
+div.wrapper.top,
+div.wrapper.bottom {
+  left: 0.5rem;
+  right: 0.5rem;
+  justify-content: center;
+}
+
+div.wrapper.top {
+  top: 0.5rem;
+}
+
+div.wrapper.bottom {
+  bottom: 0.5rem;
+}
+
+div.wrapper.left,
+div.wrapper.right {
+  top: 50%;
+  transform: translateY(-50%);
   flex-direction: column;
-  gap: 0.5rem;
+}
+
+div.wrapper.left {
+  left: 0.5rem;
+}
+
+div.wrapper.right {
+  right: 0.5rem;
+}
+
+div.wrapper.horizontal {
+  flex-direction: row;
 }
 
 div.shape-preview {
@@ -60,7 +183,6 @@ div.shape-preview {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #ccc;
   touch-action: none;
   overflow: hidden;
 }
@@ -77,21 +199,63 @@ div.shape-preview svg {
 }
 
 svg .wb:not(line) {
-  fill: white;
-  stroke: black;
+  fill: var(--background);
+  stroke: var(--dark);
   stroke-width: 1px;
 }
 
 svg .wb.red:not(line) {
   fill: #ff3b3b;
-  stroke: black;
+  stroke: var(--dark);
 }
 
 svg line.wb {
-  stroke: rgba(0,0,0,0.25);
+  stroke: var(--alpha-8-dark);
   stroke-width: 1px;
 }
 
 svg rect.wb {
   shape-rendering: optimizeSpeed;
+}
+
+div.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+input[type="color"] {
+  appearance: none;
+	-webkit-appearance: none;
+	border: none;
+	width: 2rem;
+	height: 2rem;
+  background: none;
+}
+input[type="color"]::-webkit-color-swatch-wrapper {
+	padding: 0;
+}
+input[type="color"]::-webkit-color-swatch {
+	border: 2px solid var(--alpha-2-dark);
+  border-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  button img {
+    filter: invert(1);
+  }
+}
+
+.previewShape {
+  fill: none;
+  stroke: var(--dark);
+  stroke-width: 2;
+  stroke-dasharray: 5, 5;
+}
+
+.shapeButton .previewShape {
+  fill: var(--dark);
+  stroke: var(--dark);
+  stroke-width: 10;
+  stroke-dasharray: none;
 }
