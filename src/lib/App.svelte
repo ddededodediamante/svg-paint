@@ -10,6 +10,7 @@
 
   let svgEl: SVGSVGElement;
   let mode = $state("edit");
+  let shift = false;
 
   let shapes = $state([]);
   let nextID = 0;
@@ -57,13 +58,15 @@
   }
 
   function selectHandle(shape, node, which, event) {
+    const handle = which === "out" ? node.handleOut : node.handleIn;
+    if (!handle) return;
+
     const p = pointerPos(event);
     selectedShape = shape;
     selectedNode = node;
     selectedHandle = which;
-    const h = which === "out" ? node.handleOut : node.handleIn;
-    dragOffset.x = p.x - h.x;
-    dragOffset.y = p.y - h.y;
+    dragOffset.x = p.x - handle.x;
+    dragOffset.y = p.y - handle.y;
     event?.stopPropagation?.();
   }
 
@@ -72,11 +75,24 @@
     const pointer = pointerPos(event);
 
     if (Object.keys(shapeDefs).includes(mode) && shapeStart) {
+      let x2 = pointer.x;
+      let y2 = pointer.y;
+
+      if (shift) {
+        const dx = x2 - shapeStart.x;
+        const dy = y2 - shapeStart.y;
+
+        const size = Math.max(Math.abs(dx), Math.abs(dy));
+
+        x2 = shapeStart.x + Math.sign(dx || 1) * size;
+        y2 = shapeStart.y + Math.sign(dy || 1) * size;
+      }
+
       tempShape = {
         x1: shapeStart.x,
         y1: shapeStart.y,
-        x2: pointer.x,
-        y2: pointer.y,
+        x2,
+        y2,
       };
     }
 
@@ -92,31 +108,27 @@
       const moved =
         which === "out" ? selectedNode.handleOut : selectedNode.handleIn;
 
+      if (!moved) return;
+
       const newX = pointer.x - dragOffset.x;
       const newY = pointer.y - dragOffset.y;
 
       if (which === "out") {
         selectedNode.handleOut.x = newX;
         selectedNode.handleOut.y = newY;
+
+        if (!shift && selectedNode.handleIn) {
+          selectedNode.handleIn.x = selectedNode.x - (newX - selectedNode.x);
+          selectedNode.handleIn.y = selectedNode.y - (newY - selectedNode.y);
+        }
       } else {
         selectedNode.handleIn.x = newX;
         selectedNode.handleIn.y = newY;
-      }
 
-      const nx = selectedNode.x;
-      const ny = selectedNode.y;
-
-      const mirror = {
-        x: nx - (moved.x - nx),
-        y: ny - (moved.y - ny),
-      };
-
-      if (which === "out") {
-        selectedNode.handleIn.x = mirror.x;
-        selectedNode.handleIn.y = mirror.y;
-      } else {
-        selectedNode.handleOut.x = mirror.x;
-        selectedNode.handleOut.y = mirror.y;
+        if (!shift && selectedNode.handleOut) {
+          selectedNode.handleOut.x = selectedNode.x - (newX - selectedNode.x);
+          selectedNode.handleOut.y = selectedNode.y - (newY - selectedNode.y);
+        }
       }
     } else if (selectedNode) {
       const newX = pointer.x - dragOffset.x;
@@ -283,8 +295,13 @@
         break;
     }
 
-    const sx = (pointer.x - fx) / (initialMouse.x - fx);
-    const sy = (pointer.y - fy) / (initialMouse.y - fy);
+    let sx = (pointer.x - fx) / (initialMouse.x - fx);
+    let sy = (pointer.y - fy) / (initialMouse.y - fy);
+
+    if (shift) {
+      const s = Math.abs(sx) > Math.abs(sy) ? sx : sy;
+      sx = sy = s;
+    }
 
     selectedShape.nodes.forEach((n, i) => {
       const orig = initialNodes[i];
@@ -327,9 +344,22 @@
   onMount(() => {
     syncHandles();
     resizeSVG();
+
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Shift") shift = true;
+    };
+    const keyup = (event: KeyboardEvent) => {
+      if (event.key === "Shift") shift = false;
+    };
+
     window.addEventListener("resize", resizeSVG);
+    window.addEventListener("keydown", keydown);
+    window.addEventListener("keyup", keyup);
+
     return () => {
       window.removeEventListener("resize", resizeSVG);
+      window.removeEventListener("keydown", keydown);
+      window.removeEventListener("keyup", keyup);
     };
   });
 
@@ -343,7 +373,7 @@
       if (!file) return;
 
       try {
-        const text = await file.text(); 
+        const text = await file.text();
         const loadedShapes = JSON.parse(text);
 
         if (!Array.isArray(loadedShapes)) throw new Error("Invalid format");
@@ -626,7 +656,7 @@
   }}
   onmouseup={(e) => {
     if (shapeStart) {
-      const end = pointerPos(e);
+      const end = { x: tempShape.x2, y: tempShape.y2 };
       const def = shapeDefs[mode];
       if (def) {
         const nodes = def.create(shapeStart, end);

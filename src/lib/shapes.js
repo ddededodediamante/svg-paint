@@ -5,7 +5,7 @@ export function importSVGPath(d) {
   const points = [];
 
   function pushPoint(x, y, type = "line") {
-    const p = { x, y, type, handleIn: { x, y }, handleOut: { x, y } };
+    const p = { x, y, type, handleIn: null, handleOut: null };
     points.push(p);
     return p;
   }
@@ -46,6 +46,25 @@ export function importSVGPath(d) {
   }
 
   const closedCmd = commands.some((c) => c.code === "Z");
+
+  // --- NEW: merge duplicate endpoint into first point for closed paths ---
+  if (closedCmd && points.length > 1) {
+    const eps = 1e-6;
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (Math.abs(first.x - last.x) < eps && Math.abs(first.y - last.y) < eps) {
+      // move the last point's incoming handle to the first point
+      if (last.handleIn) {
+        // prefer the last.handleIn: it defines how the curve arrives back to the starting point
+        first.handleIn = last.handleIn;
+      }
+      // If last had handleOut for some reason, it's typically irrelevant for a duplicate endpoint,
+      // but we won't copy handleOut (it would represent an outgoing control from the duplicate endpoint).
+      // Remove the duplicate final point so the path doesn't contain two coincident points.
+      points.pop();
+    }
+  }
+  // --- END NEW ---
 
   const allXs = [];
   const allYs = [];
@@ -129,12 +148,35 @@ export function importSVGPath(d) {
       }
     }
 
-    if (closedCmd) d += " Z";
+    // --- NEW: if closed and the curve closing segment was moved to the first point, draw that closing curve ---
+    if (closedCmd && pts.length > 1) {
+      const prev = pts[pts.length - 1];
+      const first = pts[0];
+      // if either side has curve handles, draw a closing curve; otherwise Z is enough
+      const needsClosingCurve =
+        (prev.handleOut &&
+          (prev.handleOut.x !== prev.x || prev.handleOut.y !== prev.y)) ||
+        (first.handleIn &&
+          (first.handleIn.x !== first.x || first.handleIn.y !== first.y));
+      if (needsClosingCurve) {
+        const c1 = prev.handleOut ?? { x: prev.x, y: prev.y };
+        const c2 = first.handleIn ?? { x: first.x, y: first.y };
+        d += ` C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${first.x} ${first.y}`;
+      }
+      d += " Z";
+    } else if (closedCmd) {
+      d += " Z";
+    }
+
     return `<path d="${d}" class="previewShape" />`;
   }
 
   return { create, preview };
 }
+
+const heart = importSVGPath(
+  "M 65 29 C 71 19 81 12 93 12 C 110 12 123 25 123 42 C 123 75 105 80 65 118 C 25 80 7 75 7 42 C 7 25 20 12 37 12 C 49 12 59 19 65 29 Z"
+);
 
 export const shapeDefs = {
   line: {
@@ -311,7 +353,5 @@ export const shapeDefs = {
       return `<polygon points="${points.join(" ")}" class="previewShape" />`;
     },
   },
-  heart: importSVGPath(
-    "M 60.83 17.19 C 68.84 8.84 74.45 1.62 86.79 0.21 C 109.96 -2.45 131.27 21.27 119.57 44.62 C 116.24 51.27 109.46 59.18 101.96 66.94 C 93.73 75.46 84.62 83.81 78.24 90.14 L 60.84 107.4 L 46.46 93.56 C 29.16 76.9 0.95 55.93 0.02 29.95 C -0.63 11.75 13.73 0.09 30.25 0.3 C 45.01 0.5 51.22 7.84 60.83 17.19 Z"
-  ),
+  heart
 };
