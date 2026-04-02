@@ -47,24 +47,17 @@ export function importSVGPath(d) {
 
   const closedCmd = commands.some((c) => c.code === "Z");
 
-  // --- NEW: merge duplicate endpoint into first point for closed paths ---
   if (closedCmd && points.length > 1) {
     const eps = 1e-6;
     const first = points[0];
     const last = points[points.length - 1];
     if (Math.abs(first.x - last.x) < eps && Math.abs(first.y - last.y) < eps) {
-      // move the last point's incoming handle to the first point
       if (last.handleIn) {
-        // prefer the last.handleIn: it defines how the curve arrives back to the starting point
         first.handleIn = last.handleIn;
       }
-      // If last had handleOut for some reason, it's typically irrelevant for a duplicate endpoint,
-      // but we won't copy handleOut (it would represent an outgoing control from the duplicate endpoint).
-      // Remove the duplicate final point so the path doesn't contain two coincident points.
       points.pop();
     }
   }
-  // --- END NEW ---
 
   const allXs = [];
   const allYs = [];
@@ -175,7 +168,7 @@ export function importSVGPath(d) {
 }
 
 const heart = importSVGPath(
-  "M 65 29 C 71 19 81 12 93 12 C 110 12 123 25 123 42 C 123 75 105 80 65 118 C 25 80 7 75 7 42 C 7 25 20 12 37 12 C 49 12 59 19 65 29 Z"
+  "M65 29c6-10 16-17 28-17 17 0 30 13 30 30 0 33-18 38-58 76C25 80 7 75 7 42 7 25 20 12 37 12c12 0 22 7 28 17Z"
 );
 
 export const shapeDefs = {
@@ -353,5 +346,6 @@ export const shapeDefs = {
       return `<polygon points="${points.join(" ")}" class="previewShape" />`;
     },
   },
-  heart
+  heart,
+  crescent
 };
