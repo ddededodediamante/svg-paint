@@ -1,89 +1,165 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
+    clonePathData,
     downloadFile,
+    getAngle,
     getShapeCenter,
+    legacyNodesToPathData,
+    niceString,
     pathD,
     pointLineDistance,
+    type PathData,
+    type Point,
   } from "../lib/utils";
-  import { shapeDefs } from "../lib/shapes.js";
+  import { shapeTools } from "../lib/shapes";
+  import {
+    cubicPoint,
+    segmentControls,
+    curveDistance,
+    segmentDistance,
+    findClosestSegmentIndex,
+    splitSegment,
+  } from "../lib/geometry";
+
+  type ToolKey = keyof typeof shapeTools;
+
+  type ShapeItem = {
+    id: number;
+    fill: string;
+    stroke: string;
+    path: PathData;
+    tool?: ToolKey;
+    toolParams?: Record<string, any>;
+  };
+
+  type HandleSide = "in" | "out";
+
+  function isToolMode(mode: string): mode is ToolKey {
+    return mode in shapeTools;
+  }
+
+  let toolParams = $state<Record<string, any>>(
+    JSON.parse(JSON.stringify(shapeTools.square.defaultParams)),
+  );
+
+  function selectTool(key: ToolKey) {
+    mode = key;
+    toolParams = JSON.parse(JSON.stringify(shapeTools[key].defaultParams));
+  }
+
+  function setToolParam(name: string, value: number) {
+    toolParams = {
+      ...toolParams,
+      [name]: value,
+    };
+  }
 
   let svgEl: SVGSVGElement;
+  let _svg: SVGSVGElement | null = null;
+  let _path: SVGPathElement | null = null;
   let mode = $state("edit");
   let shift = false;
 
-  let shapes = $state([]);
+  let shapes = $state<ShapeItem[]>([]);
   let nextID = 0;
 
-  let selectedShape = $state(null);
-  let selectedNode = null;
-  let selectedHandle = null;
-  let shapeStart = $state(null);
-  let tempShape = $state(null);
+  let selectedShape = $state<ShapeItem | null>(null);
+  let selectedSegmentIndex = $state<number | null>(null);
+  let selectedHandle = $state<HandleSide | null>(null);
+  let shapeStart = $state<Point | null>(null);
+  let tempShape = $state<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
 
   let dragOffset = { x: 0, y: 0 };
-  let box = $derived(getBoundingBox(selectedShape, false, 0) as any);
+  let box: any = $derived(
+    selectedShape ? getBoundingBox(selectedShape.path, false, 0) : defaultBox(),
+  );
 
-  let fillColor = $state("#92e85d"),
-    strokeColor = $state("#74b94a");
+  let fillColor = $state("#92e85d");
+  let strokeColor = $state("#74b94a");
 
-  function pointerPos(event) {
+  const PREVIEW_START = { x: 10, y: 10 };
+  const PREVIEW_END = { x: 90, y: 90 };
+
+  function defaultBox() {
+    return { xMin: 0, xMax: 0, yMin: 0, yMax: 0, width: 0, height: 0 };
+  }
+
+  function pointerPos(event: MouseEvent | any): Point {
     const pt = svgEl.createSVGPoint();
     pt.x = event.clientX;
     pt.y = event.clientY;
-
     const svgPoint = pt.matrixTransform(svgEl.getScreenCTM().inverse());
     return { x: svgPoint.x, y: svgPoint.y };
   }
 
-  function selectShape(shape, event) {
-    const p = pointerPos(event);
+  function selectShape(shape: ShapeItem, event?: MouseEvent) {
+    const p = event ? pointerPos(event) : getShapeCenter(shape.path);
     selectedShape = shape;
-    selectedNode = null;
+    selectedSegmentIndex = null;
     selectedHandle = null;
-    const center = getShapeCenter(shape);
-    dragOffset.x = p.x - center.x;
-    dragOffset.y = p.y - center.y;
+    currentRotationAngle = -Math.PI / 2;
+    dragOffset.x = p.x - getShapeCenter(shape.path).x;
+    dragOffset.y = p.y - getShapeCenter(shape.path).y;
     event?.stopPropagation?.();
   }
 
-  function selectNode(shape, node, event) {
+  function selectNode(shape: ShapeItem, index: number, event: MouseEvent) {
     const p = pointerPos(event);
+    const node = shape.path.segments[index];
     selectedShape = shape;
-    selectedNode = node;
+    selectedSegmentIndex = index;
     selectedHandle = null;
     dragOffset.x = p.x - node.x;
     dragOffset.y = p.y - node.y;
-    event?.stopPropagation?.();
+    event.stopPropagation();
   }
 
-  function selectHandle(shape, node, which, event) {
+  function selectHandle(
+    shape: ShapeItem,
+    index: number,
+    which: HandleSide,
+    event: MouseEvent,
+  ) {
+    const node = shape.path.segments[index];
     const handle = which === "out" ? node.handleOut : node.handleIn;
     if (!handle) return;
 
     const p = pointerPos(event);
     selectedShape = shape;
-    selectedNode = node;
+    selectedSegmentIndex = index;
     selectedHandle = which;
     dragOffset.x = p.x - handle.x;
     dragOffset.y = p.y - handle.y;
-    event?.stopPropagation?.();
+    event.stopPropagation();
   }
 
   let canDrag = false;
-  function drag(event) {
-    const pointer = pointerPos(event);
 
-    if (Object.keys(shapeDefs).includes(mode) && shapeStart) {
+  let transformMode: "scale" | "rotate" | null = null;
+  let transformStart = {
+    pointer: null as Point | null,
+    path: null as PathData | null,
+    bounds: null as any,
+    angle: 0,
+    center: null as Point | null,
+    scaleHandleIndex: null as number | null,
+  };
+  let currentRotationAngle = 0;
+  let mousePos = { x: 0, y: 0 };
+
+  function drag(event: MouseEvent) {
+    const pointer = pointerPos(event);
+    mousePos = pointer;
+
+    if (shapeStart && shapeTools[mode as keyof typeof shapeTools]) {
       let x2 = pointer.x;
       let y2 = pointer.y;
 
       if (shift) {
         const dx = x2 - shapeStart.x;
         const dy = y2 - shapeStart.y;
-
         const size = Math.max(Math.abs(dx), Math.abs(dy));
-
         x2 = shapeStart.x + Math.sign(dx || 1) * size;
         y2 = shapeStart.y + Math.sign(dy || 1) * size;
       }
@@ -98,232 +174,225 @@
 
     if (!canDrag) return;
 
-    if (scalingHandle !== null && selectedShape) {
-      scaleShape(pointer);
+    if (selectedShape) {
+      if (transformMode === "scale" && transformStart.pointer && transformStart.path && transformStart.bounds && transformStart.scaleHandleIndex !== null) {
+        scaleShape(pointer, transformStart.scaleHandleIndex);
+        return;
+      }
+      if (transformMode === "rotate") {
+        rotateShape(pointer);
+        return;
+      }
+    }
+
+    if (selectedShape && selectedSegmentIndex !== null) {
+      const path = selectedShape.path;
+      const node = path.segments[selectedSegmentIndex];
+      if (!node) return;
+
+      const newX = pointer.x - dragOffset.x;
+      const newY = pointer.y - dragOffset.y;
+
+      if (selectedHandle) {
+        if (selectedHandle === "out") {
+          node.handleOut = { x: newX, y: newY };
+          if (!shift && node.handleIn) {
+            node.handleIn = {
+              x: node.x - (newX - node.x),
+              y: node.y - (newY - node.y),
+            };
+          }
+        } else {
+          node.handleIn = { x: newX, y: newY };
+          if (!shift && node.handleOut) {
+            node.handleOut = {
+              x: node.x - (newX - node.x),
+              y: node.y - (newY - node.y),
+            };
+          }
+        }
+      } else {
+        const dx = newX - node.x;
+        const dy = newY - node.y;
+        node.x += dx;
+        node.y += dy;
+        if (node.handleIn) {
+          node.handleIn.x += dx;
+          node.handleIn.y += dy;
+        }
+        if (node.handleOut) {
+          node.handleOut.x += dx;
+          node.handleOut.y += dy;
+        }
+      }
       return;
     }
 
-    if (selectedHandle && selectedNode) {
-      const which = selectedHandle;
-      const moved =
-        which === "out" ? selectedNode.handleOut : selectedNode.handleIn;
-
-      if (!moved) return;
-
-      const newX = pointer.x - dragOffset.x;
-      const newY = pointer.y - dragOffset.y;
-
-      if (which === "out") {
-        selectedNode.handleOut.x = newX;
-        selectedNode.handleOut.y = newY;
-
-        if (!shift && selectedNode.handleIn) {
-          selectedNode.handleIn.x = selectedNode.x - (newX - selectedNode.x);
-          selectedNode.handleIn.y = selectedNode.y - (newY - selectedNode.y);
-        }
-      } else {
-        selectedNode.handleIn.x = newX;
-        selectedNode.handleIn.y = newY;
-
-        if (!shift && selectedNode.handleOut) {
-          selectedNode.handleOut.x = selectedNode.x - (newX - selectedNode.x);
-          selectedNode.handleOut.y = selectedNode.y - (newY - selectedNode.y);
-        }
-      }
-    } else if (selectedNode) {
-      const newX = pointer.x - dragOffset.x;
-      const newY = pointer.y - dragOffset.y;
-
-      const dx = newX - selectedNode.x;
-      const dy = newY - selectedNode.y;
-
-      selectedNode.x += dx;
-      selectedNode.y += dy;
-
-      if (selectedNode.handleIn) {
-        selectedNode.handleIn.x += dx;
-        selectedNode.handleIn.y += dy;
-      }
-      if (selectedNode.handleOut) {
-        selectedNode.handleOut.x += dx;
-        selectedNode.handleOut.y += dy;
-      }
-    } else if (selectedShape) {
-      const center = getShapeCenter(selectedShape);
+    if (selectedShape) {
+      const center = getShapeCenter(selectedShape.path);
       const targetX = pointer.x - dragOffset.x;
       const targetY = pointer.y - dragOffset.y;
       const dx = targetX - center.x;
       const dy = targetY - center.y;
-      selectedShape.nodes.forEach((n) => {
-        n.x += dx;
-        n.y += dy;
-        if (n.handleIn) {
-          n.handleIn.x += dx;
-          n.handleIn.y += dy;
+
+      for (const segment of selectedShape.path.segments) {
+        segment.x += dx;
+        segment.y += dy;
+        if (segment.handleIn) {
+          segment.handleIn.x += dx;
+          segment.handleIn.y += dy;
         }
-        if (n.handleOut) {
-          n.handleOut.x += dx;
-          n.handleOut.y += dy;
+        if (segment.handleOut) {
+          segment.handleOut.x += dx;
+          segment.handleOut.y += dy;
         }
-      });
+      }
     }
   }
 
   function release() {
     selectedShape = null;
-    selectedNode = null;
+    selectedSegmentIndex = null;
     selectedHandle = null;
-    scalingHandle = null;
+    transformMode = null;
+    transformStart = {
+      pointer: null,
+      path: null,
+      bounds: null,
+      angle: 0,
+      center: null,
+      scaleHandleIndex: null,
+    };
     canDrag = false;
   }
 
-  const CIRCLE_C = 0.552284749831;
-  function addHandles(shape) {
-    const nodes = shape.nodes;
-    if (!nodes || nodes.length < 2) return;
-
-    let cx = 0,
-      cy = 0;
-    nodes.forEach((n) => {
-      cx += n.x;
-      cy += n.y;
-    });
-    cx /= nodes.length;
-    cy /= nodes.length;
-
-    nodes.forEach((n, i) => {
-      if (n.type !== "curve" || (n.handleIn && n.handleOut)) return;
-
-      const prev = nodes[(i - 1 + nodes.length) % nodes.length];
-      const next = nodes[(i + 1) % nodes.length];
-
-      const dx = n.x - cx;
-      const dy = n.y - cy;
-
-      const tx = (next.x - prev.x) / 2;
-      const ty = (next.y - prev.y) / 2;
-
-      const handleLength = Math.hypot(dx, dy) * CIRCLE_C;
-
-      const len = Math.hypot(tx, ty);
-      const nx = (tx / len) * handleLength;
-      const ny = (ty / len) * handleLength;
-
-      n.handleOut = { x: n.x + nx, y: n.y + ny };
-      n.handleIn = { x: n.x - nx, y: n.y - ny };
-    });
-  }
-
-  const _svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  _svg.style.position = "absolute";
-  _svg.style.visibility = "hidden";
-  _svg.style.pointerEvents = "none";
-  _svg.style.width = "0";
-  _svg.style.height = "0";
-  document.body.appendChild(_svg);
-
-  const _path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  _svg.appendChild(_path);
-
-  function getBoundingBox(shape, bboxString = false, margin = 2) {
-    let fail = bboxString
-      ? "0 0 0 0"
-      : { xMin: 0, xMax: 0, yMin: 0, yMax: 0, width: 0, height: 0 };
-    if (!shape || !_path) return fail;
-
-    const d = pathD(shape);
-    if (d && d.trim() !== "") {
-      _path.setAttribute("d", d);
-      const bbox = _path.getBBox();
-
-      const xMin = bbox.x - margin;
-      const yMin = bbox.y - margin;
-      const width = bbox.width + margin * 2;
-      const height = bbox.height + margin * 2;
-      const xMax = xMin + width;
-      const yMax = yMin + height;
-
-      return bboxString
-        ? `${xMin} ${yMin} ${width} ${height}`
-        : { xMin, xMax, yMin, yMax, width, height };
-    }
-
-    return fail;
-  }
-
-  let scalingHandle = null;
-  let initialMouse = null;
-  let initialNodes = null;
-  let initialBox = null;
-
-  function startScaling(handleIndex, event) {
+  function startScaling(handleIndex: number, event: MouseEvent) {
     if (!selectedShape) return;
 
     canDrag = true;
-    scalingHandle = handleIndex;
-    initialMouse = pointerPos(event);
-    initialNodes = selectedShape.nodes.map((n) => ({
-      x: n.x,
-      y: n.y,
-      handleIn: n.handleIn ? { ...n.handleIn } : null,
-      handleOut: n.handleOut ? { ...n.handleOut } : null,
-    }));
-    initialBox = getBoundingBox(selectedShape);
-    event?.stopPropagation?.();
+    transformMode = "scale";
+    transformStart.pointer = pointerPos(event);
+    transformStart.path = clonePathData(selectedShape.path);
+    transformStart.bounds = getBoundingBox(selectedShape.path);
+    transformStart.scaleHandleIndex = handleIndex;
+    event.stopPropagation();
   }
 
-  function scaleShape(pointer) {
-    let fx, fy;
-    const box = initialBox;
+  function startRotation(event: MouseEvent) {
+    if (!selectedShape) return;
 
-    switch (scalingHandle) {
+    transformMode = "rotate";
+    canDrag = true;
+    transformStart.center = getShapeCenter(selectedShape.path);
+    transformStart.angle = getAngle(transformStart.center, pointerPos(event));
+    transformStart.path = clonePathData(selectedShape.path);
+    event.stopPropagation();
+  }
+
+  function scaleShape(pointer: Point, handleIndex: number) {
+    if (!selectedShape || !transformStart.pointer || !transformStart.path || !transformStart.bounds) return;
+
+    const initialBox = transformStart.bounds;
+    let fx = 0;
+    let fy = 0;
+
+    switch (handleIndex) {
       case 0:
-        fx = box.xMax;
-        fy = box.yMax;
+        fx = initialBox.xMax;
+        fy = initialBox.yMax;
         break;
       case 1:
-        fx = box.xMin;
-        fy = box.yMax;
+        fx = initialBox.xMin;
+        fy = initialBox.yMax;
         break;
       case 2:
-        fx = box.xMin;
-        fy = box.yMin;
+        fx = initialBox.xMin;
+        fy = initialBox.yMin;
         break;
       case 3:
-        fx = box.xMax;
-        fy = box.yMin;
+        fx = initialBox.xMax;
+        fy = initialBox.yMin;
         break;
+      default:
+        return;
     }
 
-    let sx = (pointer.x - fx) / (initialMouse.x - fx);
-    let sy = (pointer.y - fy) / (initialMouse.y - fy);
+    let sx = (pointer.x - fx) / (transformStart.pointer.x - fx || 1);
+    let sy = (pointer.y - fy) / (transformStart.pointer.y - fy || 1);
 
     if (shift) {
       const s = Math.abs(sx) > Math.abs(sy) ? sx : sy;
-      sx = sy = s;
+      sx = s;
+      sy = s;
     }
 
-    selectedShape.nodes.forEach((n, i) => {
-      const orig = initialNodes[i];
+    selectedShape.path.segments.forEach((segment, i) => {
+      const orig = transformStart.path.segments[i];
+      if (!orig) return;
 
-      n.x = fx + (orig.x - fx) * sx;
-      n.y = fy + (orig.y - fy) * sy;
+      segment.x = fx + (orig.x - fx) * sx;
+      segment.y = fy + (orig.y - fy) * sy;
 
       if (orig.handleIn) {
-        n.handleIn.x = fx + (orig.handleIn.x - fx) * sx;
-        n.handleIn.y = fy + (orig.handleIn.y - fy) * sy;
+        segment.handleIn = {
+          x: fx + (orig.handleIn.x - fx) * sx,
+          y: fy + (orig.handleIn.y - fy) * sy,
+        };
+      } else {
+        segment.handleIn = null;
       }
+
       if (orig.handleOut) {
-        n.handleOut.x = fx + (orig.handleOut.x - fx) * sx;
-        n.handleOut.y = fy + (orig.handleOut.y - fy) * sy;
+        segment.handleOut = {
+          x: fx + (orig.handleOut.x - fx) * sx,
+          y: fy + (orig.handleOut.y - fy) * sy,
+        };
+      } else {
+        segment.handleOut = null;
       }
     });
   }
 
-  function syncHandles() {
-    shapes.forEach((s) => {
-      addHandles(s);
+  function rotateShape(pointer: Point) {
+    if (!selectedShape || !transformStart.center || !transformStart.path) return;
+
+    const rotationCenter = transformStart.center;
+    const initialAngle = transformStart.angle;
+    const currentAngle = getAngle(rotationCenter, pointer);
+    let delta = currentAngle - initialAngle;
+
+    if (shift) {
+      const snap = Math.PI / 4;
+      delta = Math.round(delta / snap) * snap;
+    }
+
+    const cos = Math.cos(delta);
+    const sin = Math.sin(delta);
+
+    selectedShape.path.segments.forEach((seg, i) => {
+      const orig = transformStart.path!.segments[i];
+
+      function rotatePoint(p: Point): Point {
+        const dx = p.x - rotationCenter.x;
+        const dy = p.y - rotationCenter.y;
+        return {
+          x: rotationCenter.x + dx * cos - dy * sin,
+          y: rotationCenter.y + dx * sin + dy * cos,
+        };
+      }
+
+      const rotated = rotatePoint(orig);
+      seg.x = rotated.x;
+      seg.y = rotated.y;
+
+      if (orig.handleIn) seg.handleIn = rotatePoint(orig.handleIn);
+      else seg.handleIn = null;
+
+      if (orig.handleOut) seg.handleOut = rotatePoint(orig.handleOut);
+      else seg.handleOut = null;
     });
+
+    currentRotationAngle = currentAngle;
   }
 
   function resizeSVG() {
@@ -341,8 +410,258 @@
     svgEl.style.height = height - 10 + "px";
   }
 
+  function isPointOnShapeBorder(shape: ShapeItem, point: Point) {
+    const d = pathD(shape.path);
+    if (!d) return false;
+
+    if (!_path) return false;
+
+    _path.setAttribute("d", d);
+    _path.setAttribute("fill", "none");
+    _path.setAttribute("stroke", "black");
+    _path.setAttribute("stroke-width", "10");
+
+    const testPoint = svgEl.createSVGPoint();
+    testPoint.x = point.x;
+    testPoint.y = point.y;
+    return _path.isPointInStroke(testPoint);
+  }
+
+  function addNodeOnBorder(shape: ShapeItem, point: Point) {
+    const index = findClosestSegmentIndex(shape.path, point);
+    return splitSegment(shape.path, index, 0.5);
+  }
+
+  function getBoundingBox(pathLike: any, bboxString = false, margin = 2) {
+    const fail = bboxString
+      ? "0 0 0 0"
+      : { xMin: 0, xMax: 0, yMin: 0, yMax: 0, width: 0, height: 0 };
+
+    if (!pathLike || !_path) return fail;
+
+    const d = pathD(pathLike);
+    if (d && d.trim() !== "") {
+      _path.setAttribute("d", d);
+      const bbox = _path.getBBox();
+      const xMin = bbox.x - margin;
+      const yMin = bbox.y - margin;
+      const width = bbox.width + margin * 2;
+      const height = bbox.height + margin * 2;
+      const xMax = xMin + width;
+      const yMax = yMin + height;
+
+      return bboxString
+        ? `${xMin} ${yMin} ${width} ${height}`
+        : { xMin, xMax, yMin, yMax, width, height };
+    }
+
+    return fail;
+  }
+
+  function loadButton() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+
+    input.onchange = async (event: any) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const loaded = JSON.parse(text);
+        if (!Array.isArray(loaded)) throw new Error("Invalid format");
+
+        const normalized = loaded.map((item, index) => {
+          const id = Number.isFinite(item?.id) ? item.id : index;
+          if (item?.path?.segments) {
+            return {
+              id,
+              fill: item.fill ?? fillColor,
+              stroke: item.stroke ?? strokeColor,
+              path: clonePathData(item.path),
+            } satisfies ShapeItem;
+          }
+          if (item?.segments) {
+            return {
+              id,
+              fill: item.fill ?? fillColor,
+              stroke: item.stroke ?? strokeColor,
+              path: clonePathData(item),
+            } satisfies ShapeItem;
+          }
+          if (Array.isArray(item?.nodes)) {
+            return {
+              id,
+              fill: item.fill ?? fillColor,
+              stroke: item.stroke ?? strokeColor,
+              path: legacyNodesToPathData(item),
+            } satisfies ShapeItem;
+          }
+          throw new Error(`Unsupported shape at index ${index}`);
+        });
+
+        shapes = normalized;
+        nextID = normalized.reduce((max, item) => Math.max(max, item.id), -1) + 1;
+        release();
+      } catch (err: any) {
+        alert("Invalid JSON: " + (err?.message ?? String(err)));
+      }
+    };
+
+    input.click();
+  }
+
+  function cloneSvgEl({ fit = true }: { fit?: boolean }) {
+    const clone = svgEl.cloneNode(true) as SVGSVGElement;
+    clone.querySelectorAll(".wb").forEach(el => el.remove());
+
+    let bbox: { width: number; height: number; x: number; y: number } | undefined;
+    if (fit === true) {
+      bbox = svgEl.getBBox();
+      const width = Math.max(1, bbox.width);
+      const height = Math.max(1, bbox.height);
+      clone.setAttribute("width", String(width));
+      clone.setAttribute("height", String(height));
+      clone.setAttribute("viewBox", `${bbox.x} ${bbox.y} ${width} ${height}`);
+    }
+
+    return { element: clone, bbox };
+  }
+
+  function downloadSVG() {
+    const { element: clone } = cloneSvgEl({ fit: true });
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(clone);
+
+    downloadFile({
+      filename: "image.svg",
+      source,
+      type: "image/svg+xml;charset=utf-8",
+    });
+  }
+
+  function downloadPNG() {
+    const { element: clone, bbox } = cloneSvgEl({ fit: true });
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(clone);
+
+    const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(svgBlob);
+
+    const img = new Image();
+    img.onload = () => {
+      const width = Math.max(1, Math.ceil(bbox?.width ?? img.width ?? 1));
+      const height = Math.max(1, Math.ceil(bbox?.height ?? img.height ?? 1));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+      }
+
+      canvas.toBlob(blob => {
+        if (!blob) return;
+        downloadFile({
+          filename: "image.png",
+          source: blob,
+          type: "image/png",
+        });
+      }, "image/png");
+
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  }
+
+  let dragSrcIndex: number | null = null;
+  function handleDragStart(event: DragEvent, index: number) {
+    dragSrcIndex = index;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", String(index));
+    }
+  }
+
+  function handleDrop(event: DragEvent, index: number) {
+    event.preventDefault();
+    const from = dragSrcIndex;
+    if (from === null) return;
+
+    const reversed = [...shapes].reverse();
+    const moved = reversed.splice(from, 1)[0];
+    reversed.splice(index, 0, moved);
+    shapes = reversed.reverse();
+    dragSrcIndex = null;
+  }
+
+  function shapePreviewMarkup(key: string) {
+    const def = shapeTools[key as ToolKey];
+    if (!def) return "";
+
+    const path = def.createPathData(
+      PREVIEW_START,
+      PREVIEW_END,
+      JSON.parse(JSON.stringify(def.defaultParams)),
+    );
+
+    return `<path d="${pathD(path)}" class="previewShape" />`;
+  }
+
+  function createShapeFromMode(start: Point, end: Point) {
+    if (!isToolMode(mode)) return null;
+
+    const def = shapeTools[mode];
+    const path = def.createPathData(start, end, toolParams);
+
+    return {
+      id: nextID++,
+      fill: fillColor,
+      stroke: strokeColor,
+      path,
+      tool: mode,
+      toolParams: JSON.parse(JSON.stringify(toolParams)),
+    } satisfies ShapeItem;
+  }
+
+  function getRotationHandle() {
+    if (!selectedShape) return null;
+
+    const center = getShapeCenter(selectedShape.path);
+
+    if (transformMode === "rotate" && mousePos) {
+      return {
+        cx: mousePos.x,
+        cy: mousePos.y,
+        center,
+      };
+    }
+
+    const dist = Math.max(box.width, box.height) / 2 + 30;
+    const angle = currentRotationAngle;
+
+    return {
+      cx: center.x + Math.cos(angle) * dist,
+      cy: center.y + Math.sin(angle) * dist,
+      center,
+    };
+  }
+
   onMount(() => {
-    syncHandles();
+    _svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    _svg.style.position = "absolute";
+    _svg.style.visibility = "hidden";
+    _svg.style.pointerEvents = "none";
+    _svg.style.width = "0";
+    _svg.style.height = "0";
+    document.body.appendChild(_svg);
+
+    _path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    _svg.appendChild(_path);
+
     resizeSVG();
 
     const keydown = (event: KeyboardEvent) => {
@@ -362,188 +681,64 @@
       window.removeEventListener("keyup", keyup);
     };
   });
-
-  function loadButton() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-
-    input.onchange = async (event: any) => {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      try {
-        const text = await file.text();
-        const loadedShapes = JSON.parse(text);
-
-        if (!Array.isArray(loadedShapes)) throw new Error("Invalid format");
-
-        shapes = loadedShapes;
-
-        release();
-        syncHandles();
-      } catch (err) {
-        alert("Invalid JSON: " + err.message);
-      }
-    };
-
-    input.click();
-  }
-
-  function cloneSvgEl({ fit = false }) {
-    const clone = svgEl.cloneNode(true) as SVGSVGElement;
-    clone
-      .querySelectorAll(".wb")
-      .forEach((el: { remove: () => any }) => el.remove());
-
-    let bbox: { width: any; height: any; x: any; y: any };
-    if (fit === true) {
-      bbox = svgEl.getBBox();
-      clone.setAttribute("width", bbox.width);
-      clone.setAttribute("height", bbox.height);
-      clone.setAttribute(
-        "viewBox",
-        `${bbox.x} ${bbox.y} ${bbox.width} ${bbox.height}`
-      );
-    }
-
-    return { element: clone, bbox };
-  }
-
-  function downloadSVG() {
-    const clone = cloneSvgEl({ fit: false }).element;
-    const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(clone);
-
-    downloadFile({
-      filename: "image.svg",
-      source,
-      type: "image/svg+xml;charset=utf-8",
-    });
-  }
-
-  function downloadPNG() {
-    const { element: clone, bbox } = cloneSvgEl({ fit: false });
-    const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(clone);
-
-    const svgBlob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
-    const url = URL.createObjectURL(svgBlob);
-
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = bbox.width;
-      canvas.height = bbox.height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, bbox.width, bbox.height);
-
-      canvas.toBlob((blob) => {
-        downloadFile({
-          filename: "image.png",
-          source: blob,
-          type: "image/png",
-        });
-      }, "image/png");
-
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  }
-
-  let dragSrcIndex = null;
-  function handleDragStart(event, index) {
-    dragSrcIndex = index;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", index);
-  }
-
-  function handleDrop(event, index) {
-    event.preventDefault();
-    const from = dragSrcIndex;
-    if (from === null) return;
-
-    const reversed = [...shapes].reverse();
-    const moved = reversed.splice(from, 1)[0];
-    reversed.splice(index, 0, moved);
-    shapes = reversed.reverse();
-    dragSrcIndex = null;
-  }
-
-  function isPointOnShapeBorder(shape, point) {
-    function pointSVG(point) {
-      const pt = svgEl.createSVGPoint();
-      pt.x = point.x;
-      pt.y = point.y;
-      return pt;
-    }
-
-    const d = pathD(shape);
-    _path.setAttribute("d", d);
-    _path.setAttribute("stroke-width", "5");
-    return (
-      _path.isPointInStroke(
-        svgEl.createSVGPoint().matrixTransform(svgEl.getScreenCTM().inverse())
-      ) || _path.isPointInStroke(pointSVG(point))
-    );
-  }
-
-  function addNodeOnBorder(shape, point) {
-    let bestIndex = 0;
-    let minDist = Infinity;
-
-    for (let i = 0; i < shape.nodes.length; i++) {
-      const curr = shape.nodes[i];
-      const next = shape.nodes[(i + 1) % shape.nodes.length];
-      const dist = pointLineDistance(point, curr, next);
-      if (dist < minDist) {
-        minDist = dist;
-        bestIndex = i + 1;
-      }
-    }
-
-    const prev =
-      shape.nodes[(bestIndex - 1 + shape.nodes.length) % shape.nodes.length];
-    const next = shape.nodes[bestIndex % shape.nodes.length];
-
-    const type =
-      prev.type === next.type ? prev.type : prev.type || next.type || "rect";
-    const newNode = { x: point.x, y: point.y, type };
-    shape.nodes.splice(bestIndex, 0, newNode);
-
-    syncHandles();
-  }
 </script>
 
-<div class="wrapper top horizontal">
-  <p>Fill</p>
-  <input
-    type="color"
-    value={fillColor}
-    onchange={(e) => (fillColor = e.currentTarget.value)}
-  />
-  <p>Stroke</p>
-  <input
-    type="color"
-    value={strokeColor}
-    onchange={(e) => (strokeColor = e.currentTarget.value)}
-  />
-  <button
-    onclick={() => {
-      shapes = [];
-      release();
-    }}>New File</button
-  >
-  <button
-    onclick={() => {
-      downloadFile({
-        source: JSON.stringify($state.snapshot(shapes)),
-        type: "application/json",
-        filename: "shapes.json",
-      });
-    }}>Save</button
-  >
-  <button onclick={loadButton}>Load</button>
+<div class="wrapper top horizontal spacious">
+  <div class="horizontal">
+    <p>Fill</p>
+    <input
+      type="color"
+      value={fillColor}
+      onchange={e => (fillColor = (e.currentTarget as HTMLInputElement).value)}
+    />
+    <p>Stroke</p>
+    <input
+      type="color"
+      value={strokeColor}
+      onchange={e => (strokeColor = (e.currentTarget as HTMLInputElement).value)}
+    />
+  </div>
+  {#if isToolMode(mode) && shapeTools[mode].controls}
+    <div class="horizontal">
+      {#each Object.entries(shapeTools[mode].controls!) as [name, control]}
+        <label class="tool-control">
+          <span>{niceString(name)}</span>
+          <input
+            type="number"
+            min={control.min}
+            max={control.max}
+            step={control.step ?? 1}
+            value={toolParams[name] ?? shapeTools[mode].defaultParams[name]}
+            oninput={e =>
+              setToolParam(name, Number((e.currentTarget as HTMLInputElement).value))}
+          />
+        </label>
+      {/each}
+    </div>
+  {/if}
+  <div class="horizontal">
+    <button
+      onclick={() => {
+        shapes = [];
+        release();
+        nextID = 0;
+      }}
+    >
+      New File
+    </button>
+    <button
+      onclick={() => {
+        downloadFile({
+          source: JSON.stringify($state.snapshot(shapes)),
+          type: "application/json",
+          filename: "shapes.json",
+        });
+      }}
+    >
+      Save
+    </button>
+    <button onclick={loadButton}>Load</button>
+  </div>
 </div>
 
 <div class="wrapper left">
@@ -561,27 +756,21 @@
     <button
       disabled={!selectedShape}
       onclick={() => {
-        if (!selectedShape) {
-          alert("Select a shape first");
-          return;
-        }
-
-        let index = shapes.findIndex((s) => s.id === selectedShape.id);
-        if (index !== -1) {
-          shapes.splice(index, 1);
-          selectedShape = null;
-        }
+        if (!selectedShape) return;
+        shapes = shapes.filter(shape => shape.id !== selectedShape!.id);
+        release();
       }}
     >
       <img src="/trash.svg" alt="delete" />
     </button>
   </div>
+
   <p>Shapes</p>
   <div class="grid">
-    {#each Object.entries(shapeDefs) as [key, def]}
-      <button class="shapeButton" onclick={() => (mode = key)} title={key}>
+    {#each Object.entries(shapeTools) as [key, def]}
+      <button class="shapeButton" onclick={() => selectTool(key as ToolKey)} title={key}>
         <svg viewBox="0 0 100 100" width="100%" height="100%">
-          {@html def.preview({ x: 10, y: 10 }, { x: 90, y: 90 })}
+          {@html shapePreviewMarkup(key)}
         </svg>
       </button>
     {/each}
@@ -593,16 +782,14 @@
 <div class="wrapper right">
   {#each [...shapes].reverse() as shape, i (shape.id)}
     <div
-      class={selectedShape === shape
-        ? "shape-preview selected"
-        : "shape-preview"}
+      class={selectedShape === shape ? "shape-preview selected" : "shape-preview"}
       draggable="true"
-      ondragstart={(e) => handleDragStart(e, i)}
-      ondragover={(e) => {
+      ondragstart={e => handleDragStart(e, i)}
+      ondragover={e => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
       }}
-      ondrop={(e) => handleDrop(e, i)}
+      ondrop={e => handleDrop(e, i)}
     >
       {#key shape.id}
         <svg
@@ -610,15 +797,15 @@
           preserveAspectRatio="xMidYMid meet"
           width="100%"
           height="100%"
-          viewBox={getBoundingBox(shape, true) as string}
+          viewBox={getBoundingBox(shape.path, true) as string}
           onmousedown={() => {
             selectedShape = shape;
-            selectedNode = null;
+            selectedSegmentIndex = null;
             selectedHandle = null;
           }}
         >
           <path
-            d={pathD(shape)}
+            d={pathD(shape.path)}
             fill={shape.fill}
             stroke={shape.stroke}
             stroke-width="2"
@@ -638,65 +825,56 @@
   height="600"
   role="application"
   aria-label="SVG editor"
-  onmousemove={(event) => drag(event)}
-  onmousedown={(event) => {
+  onmousemove={event => drag(event)}
+  onmousedown={event => {
     const p = pointerPos(event);
 
-    if (!shapeStart && Object.keys(shapeDefs).includes(mode)) {
+    if (!shapeStart && shapeTools[mode as keyof typeof shapeTools]) {
       shapeStart = p;
       tempShape = { x1: p.x, y1: p.y, x2: p.x, y2: p.y };
       return;
     }
 
-    if (event.target === svgEl) release();
-    else {
+    if (event.target === svgEl) {
+      release();
+    } else {
       canDrag = true;
-      scalingHandle = null;
+      transformMode = null;
     }
   }}
-  onmouseup={(e) => {
-    if (shapeStart) {
-      const end = { x: tempShape.x2, y: tempShape.y2 };
-      const def = shapeDefs[mode];
-      if (def) {
-        const nodes = def.create(shapeStart, end);
-        shapes.push({
-          id: nextID++,
-          fill: fillColor,
-          stroke: strokeColor,
-          nodes,
-        });
+onmouseup={() => {
+      if (shapeStart && tempShape) {
+        const end = { x: tempShape.x2, y: tempShape.y2 };
+        const newShape = createShapeFromMode(shapeStart, end);
+        if (newShape) {
+          shapes.push(newShape);
+        }
+        shapeStart = null;
+        tempShape = null;
       }
 
-      shapeStart = null;
-      tempShape = null;
-      syncHandles();
-    }
-
-    canDrag = false;
-  }}
-  onmouseleave={() => {
-    canDrag = false;
-    scalingHandle = null;
-    shapeStart = null;
-    tempShape = null;
-  }}
+      canDrag = false;
+      transformMode = null;
+    }}
 >
   {#each shapes as shape}
     <path
-      d={pathD(shape)}
+      d={pathD(shape.path)}
       fill={shape.fill}
       stroke={shape.stroke}
       stroke-width="2"
-      onmousedown={(e) => {
-        canDrag = true;
-        scalingHandle = null;
-        selectShape(shape, e);
+onmousedown={e => {
+          canDrag = true;
+          transformMode = null;
+          selectShape(shape, e);
 
         const p = pointerPos(e);
-
         if (mode === "edit" && isPointOnShapeBorder(shape, p)) {
-          addNodeOnBorder(shape, p);
+          const insertedIndex = addNodeOnBorder(shape, p);
+          selectedShape = shape;
+          selectedSegmentIndex = insertedIndex;
+          selectedHandle = null;
+          dragOffset = { x: 0, y: 0 };
         } else if (mode === "paint") {
           shape.fill = fillColor;
           shape.stroke = strokeColor;
@@ -705,65 +883,63 @@
       onmouseup={() => (canDrag = false)}
     />
 
-    {#if mode === "edit"}
-      {#each shape.nodes as node}
-        {#if mode === "edit" && selectedShape === shape}
-          {#if node.handleIn}
-            <line
-              x1={node.x}
-              y1={node.y}
-              x2={node.handleIn.x}
-              y2={node.handleIn.y}
-              class="wb"
-            />
-            <circle
-              cx={node.handleIn.x}
-              cy={node.handleIn.y}
-              r="5"
-              class="wb"
-              onmousedown={(e) => {
-                canDrag = true;
-                selectHandle(shape, node, "in", e);
-              }}
-              onmouseup={() => {
-                canDrag = false;
-              }}
-            />
-          {/if}
+    {#if mode === "edit" && selectedShape === shape}
+      {#each shape.path.segments as segment, index}
+        {#if segment.handleIn}
+          <line
+            x1={segment.x}
+            y1={segment.y}
+            x2={segment.handleIn.x}
+            y2={segment.handleIn.y}
+            class="wb"
+          />
+          <circle
+            cx={segment.handleIn.x}
+            cy={segment.handleIn.y}
+            r="5"
+            class="wb"
+            onmousedown={e => {
+              canDrag = true;
+              selectHandle(shape, index, "in", e);
+            }}
+            onmouseup={() => {
+              canDrag = false;
+            }}
+          />
+        {/if}
 
-          {#if node.handleOut}
-            <line
-              x1={node.x}
-              y1={node.y}
-              x2={node.handleOut.x}
-              y2={node.handleOut.y}
-              class="wb"
-            />
-            <circle
-              cx={node.handleOut.x}
-              cy={node.handleOut.y}
-              r="5"
-              class="wb"
-              onmousedown={(e) => {
-                canDrag = true;
-                selectHandle(shape, node, "out", e);
-              }}
-              onmouseup={() => {
-                canDrag = false;
-              }}
-            />
-          {/if}
+        {#if segment.handleOut}
+          <line
+            x1={segment.x}
+            y1={segment.y}
+            x2={segment.handleOut.x}
+            y2={segment.handleOut.y}
+            class="wb"
+          />
+          <circle
+            cx={segment.handleOut.x}
+            cy={segment.handleOut.y}
+            r="5"
+            class="wb"
+            onmousedown={e => {
+              canDrag = true;
+              selectHandle(shape, index, "out", e);
+            }}
+            onmouseup={() => {
+              canDrag = false;
+            }}
+          />
         {/if}
 
         <circle
-          cx={node.x}
-          cy={node.y}
+          cx={segment.x}
+          cy={segment.y}
           r="6"
           class="wb red"
-          onmousedown={(e) => {
+          onmousedown={e => {
             canDrag = true;
-            scalingHandle = null;
-            selectNode(shape, node, e);
+            transformMode = null;
+            selectNode(shape, index, e);
           }}
           onmouseup={() => (canDrag = false)}
         />
@@ -772,6 +948,20 @@
   {/each}
 
   {#if mode === "transform" && selectedShape}
+    {@const rot = getRotationHandle()}
+
+    {#if rot}
+      <circle
+        cx={rot.cx}
+        cy={rot.cy}
+        r="6"
+        class="wb"
+        style="cursor: grab"
+        onmousedown={startRotation}
+        onmouseup={() => (transformMode = null)}
+      />
+    {/if}
+
     {#each [{ x: box.xMin, y: box.yMin, cursor: "nwse-resize" }, { x: box.xMax, y: box.yMin, cursor: "nesw-resize" }, { x: box.xMax, y: box.yMax, cursor: "nwse-resize" }, { x: box.xMin, y: box.yMax, cursor: "nesw-resize" }] as handle, i}
       <rect
         x={handle.x - 5}
@@ -779,17 +969,23 @@
         width="10"
         height="10"
         class="wb"
-        style="cursor: {handle.cursor}"
-        onmousedown={(e) => startScaling(i, e)}
-        onmouseup={() => ((canDrag = false), (scalingHandle = null))}
+        style={`cursor: ${handle.cursor}`}
+        onmousedown={e => startScaling(i, e)}
+        onmouseup={() => ((canDrag = false), (transformMode = null))}
       />
     {/each}
   {/if}
 
-  {#if tempShape}
-    {@html shapeDefs[mode]?.preview(
-      { x: tempShape.x1, y: tempShape.y1 },
-      { x: tempShape.x2, y: tempShape.y2 }
-    )}
+  {#if tempShape && isToolMode(mode)}
+    <path
+      d={pathD(
+        shapeTools[mode].createPathData(
+          { x: tempShape.x1, y: tempShape.y1 },
+          { x: tempShape.x2, y: tempShape.y2 },
+          toolParams,
+        ),
+      )}
+      class="previewShape"
+    />
   {/if}
 </svg>

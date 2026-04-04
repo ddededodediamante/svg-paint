@@ -128,13 +128,10 @@ svg[role="application"] circle:active {
 div.wrapper {
   display: flex;
   position: fixed;
-  justify-content: center;
-  align-items: center;
   background: var(--alpha-6-background);
   border-radius: 8px;
   padding: 0.5rem;
   z-index: 10;
-  gap: 0.5rem;
   transition: background-color 0.2s ease;
   will-change: background-color;
 }
@@ -143,11 +140,25 @@ div.wrapper:hover {
   background: var(--alpha-8-background);
 }
 
+div.wrapper, .horizontal, .spacious {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.horizontal {
+  flex-direction: row !important;
+}
+
+.spacious {
+  justify-content: space-between !important;
+}
+
 div.wrapper.top,
 div.wrapper.bottom {
   left: 0.5rem;
   right: 0.5rem;
-  justify-content: center;
 }
 
 div.wrapper.top {
@@ -171,10 +182,6 @@ div.wrapper.left {
 
 div.wrapper.right {
   right: 0.5rem;
-}
-
-div.wrapper.horizontal {
-  flex-direction: row;
 }
 
 div.shape-preview {
@@ -222,6 +229,14 @@ div.grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.5rem;
+}
+
+input:not([type="color"]) {
+  background: var(--background);
+  border: 1px solid var(--alpha-2-dark);
+  border-radius: 8px;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.9rem;
 }
 
 input[type="color"] {
