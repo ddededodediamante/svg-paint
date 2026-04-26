@@ -1,7 +1,12 @@
 import { defineConfig } from 'vite'
-import { svelte } from '@sveltejs/vite-plugin-svelte'
+import preact from '@preact/preset-vite'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [preact()],
+  resolve: {
+    alias: {
+      'react': 'preact/compat',
+      'react-dom': 'preact/compat'
+    }
+  }
 })
