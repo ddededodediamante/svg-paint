@@ -12,6 +12,7 @@ import {
 } from "../lib/utils";
 import { shapeTools } from "../lib/shapes";
 import { findClosestSegmentIndex, splitSegment } from "../lib/geometry";
+import { DropdownButton } from "./components/DropdownButton";
 
 type ToolKey = keyof typeof shapeTools;
 
@@ -163,6 +164,16 @@ export default function App() {
     event.stopPropagation();
   }
 
+  function updateSelectedPath(newSegments: PathData["segments"]) {
+    if (!selectedShape) return;
+    const updated = {
+      ...selectedShape,
+      path: { ...selectedShape.path, segments: newSegments },
+    };
+    setSelectedShape(updated);
+    setShapes(prev => prev.map(s => (s.id === updated.id ? updated : s)));
+  }
+
   function release() {
     setSelectedShape(null);
     setSelectedSegmentIndex(null);
@@ -270,9 +281,7 @@ export default function App() {
       };
     });
 
-    setSelectedShape(prev =>
-      prev ? { ...prev, path: { ...prev.path, segments: newSegments } } : null,
-    );
+    updateSelectedPath(newSegments);
   }
 
   function rotateShape(pointer: Point) {
@@ -312,9 +321,7 @@ export default function App() {
       };
     });
 
-    setSelectedShape(prev =>
-      prev ? { ...prev, path: { ...prev.path, segments: newSegments } } : null,
-    );
+    updateSelectedPath(newSegments);
     setCurrentRotationAngle(currentAngle);
   }
 
@@ -689,9 +696,7 @@ export default function App() {
                 : node.handleOut,
           };
         }
-        setSelectedShape(prev =>
-          prev ? { ...prev, path: { ...prev.path, segments: newSegments } } : null,
-        );
+        updateSelectedPath(newSegments);
       } else {
         const dx = newX - node.x;
         const dy = newY - node.y;
@@ -709,9 +714,7 @@ export default function App() {
               : null,
           };
         });
-        setSelectedShape(prev =>
-          prev ? { ...prev, path: { ...prev.path, segments: newSegments } } : null,
-        );
+        updateSelectedPath(newSegments);
       }
       return;
     }
@@ -734,9 +737,7 @@ export default function App() {
           ? { x: segment.handleOut.x + dx, y: segment.handleOut.y + dy }
           : null,
       }));
-      setSelectedShape(prev =>
-        prev ? { ...prev, path: { ...prev.path, segments: newSegments } } : null,
-      );
+      updateSelectedPath(newSegments);
     }
   };
 
@@ -854,9 +855,15 @@ export default function App() {
           </div>
         )}
         <div class="horizontal">
-          <button onClick={handleNewFile}>New File</button>
-          <button onClick={handleSave}>Save</button>
-          <button onClick={loadButton}>Load</button>
+          <DropdownButton label="File" flip={true}>
+            <button onClick={handleNewFile}>New File</button>
+            <button onClick={handleSave}>Save</button>
+            <button onClick={loadButton}>Load</button>
+            <DropdownButton label="Export...">
+              <button onClick={downloadSVG}>SVG</button>
+              <button onClick={downloadPNG}>PNG</button>
+            </DropdownButton>
+          </DropdownButton>
         </div>
       </div>
 
@@ -879,7 +886,7 @@ export default function App() {
 
         <p>Shapes</p>
         <div class="grid">
-          {Object.entries(shapeTools).map(([key, def]) => (
+          {Object.entries(shapeTools).map(([key, _def]) => (
             <button
               className="shapeButton"
               onClick={() => selectTool(key as ToolKey)}
@@ -897,7 +904,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="wrapper right">
+      <div class="wrapper right">
         {[...shapes].reverse().map((shape, i) => (
           <div
             key={shape.id}
