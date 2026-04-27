@@ -15,6 +15,7 @@ import { shapeTools } from "../lib/shapes";
 import { findClosestSegmentIndex, splitSegment } from "../lib/geometry";
 import { DropdownButton } from "./components/DropdownButton";
 import type { ToolKey, ShapeItem, BoundingBox, HandleSide } from "./types";
+import { ControlInput } from "./components/ControlInput";
 
 function isToolMode(mode: string): mode is ToolKey {
   return mode in shapeTools;
@@ -64,27 +65,19 @@ export default function App() {
   const svgElRef = useRef<SVGSVGElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pathRef = useRef<SVGPathElement | null>(null);
-
   const dragOffset = useRef({ x: 0, y: 0 });
-
-  const PREVIEW_START = { x: 10, y: 10 };
-  const PREVIEW_END = { x: 90, y: 90 };
-
-  function defaultBox() {
-    return { xMin: 0, xMax: 0, yMin: 0, yMax: 0, width: 0, height: 0 };
-  }
 
   const box: BoundingBox = useMemo(
     () =>
       selectedShape
         ? (getBoundingBox(selectedShape.path, false, 0) as any)
-        : defaultBox(),
+        : { xMin: 0, xMax: 0, yMin: 0, yMax: 0, width: 0, height: 0 },
     [selectedShape],
   );
 
   function selectTool(key: ToolKey) {
     setMode(key);
-    setToolParams(JSON.parse(JSON.stringify(shapeTools[key].defaultParams)));
+    setToolParams(Object.assign({}, shapeTools[key].defaultParams));
   }
 
   function setToolParam(name: string, value: number) {
@@ -519,8 +512,8 @@ export default function App() {
     if (!def) return "";
 
     const path = def.createPathData(
-      PREVIEW_START,
-      PREVIEW_END,
+      { x: 10, y: 10 },
+      { x: 90, y: 90 },
       JSON.parse(JSON.stringify(def.defaultParams)),
     );
 
@@ -817,30 +810,14 @@ export default function App() {
         </div>
         {isToolMode(mode) && shapeTools[mode].controls && (
           <div class="horizontal">
-            {Object.entries(shapeTools[mode].controls!).map(([name, control]) => (
-              <label class="horizontal" key={name}>
-                <p>{niceString(name)}</p>
-                <input
-                  type="number"
-                  min={control.min}
-                  max={control.max}
-                  step={control.step ?? 1}
-                  value={toolParams[name] ?? shapeTools[mode].defaultParams[name]}
-                  onInput={e =>
-                    setToolParam(name, Number((e.target as HTMLInputElement).value))
-                  }
-                  onChange={e =>
-                    setToolParam(
-                      name,
-                      clamp(
-                        control.min,
-                        Number((e.target as HTMLInputElement).value),
-                        control.max,
-                      ),
-                    )
-                  }
-                />
-              </label>
+            {Object.entries(shapeTools[mode].controls || {}).map(([name, control]) => (
+              <ControlInput
+                key={name}
+                name={niceString(name)}
+                control={control}
+                actualValue={toolParams[name]}
+                onValueChange={value => setToolParam(name, value)}
+              />
             ))}
           </div>
         )}
