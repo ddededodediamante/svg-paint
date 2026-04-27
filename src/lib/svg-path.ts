@@ -269,15 +269,15 @@ export function importSVGPath(d: string): PathData {
     y: (s.y - minY) / h,
     handleIn: s.handleIn
       ? {
-        x: (s.handleIn.x - minX) / w,
-        y: (s.handleIn.y - minY) / h,
-      }
+          x: (s.handleIn.x - minX) / w,
+          y: (s.handleIn.y - minY) / h,
+        }
       : null,
     handleOut: s.handleOut
       ? {
-        x: (s.handleOut.x - minX) / w,
-        y: (s.handleOut.y - minY) / h,
-      }
+          x: (s.handleOut.x - minX) / w,
+          y: (s.handleOut.y - minY) / h,
+        }
       : null,
   }));
 

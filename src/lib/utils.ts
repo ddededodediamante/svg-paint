@@ -159,15 +159,15 @@ export function scalePathData(path: PathData, start: Point, end: Point): PathDat
         y: baseY,
         handleIn: segment.handleIn
           ? {
-            x: baseX + (segment.handleIn.x - segment.x) * width,
-            y: baseY + (segment.handleIn.y - segment.y) * height,
-          }
+              x: baseX + (segment.handleIn.x - segment.x) * width,
+              y: baseY + (segment.handleIn.y - segment.y) * height,
+            }
           : null,
         handleOut: segment.handleOut
           ? {
-            x: baseX + (segment.handleOut.x - segment.x) * width,
-            y: baseY + (segment.handleOut.y - segment.y) * height,
-          }
+              x: baseX + (segment.handleOut.x - segment.x) * width,
+              y: baseY + (segment.handleOut.y - segment.y) * height,
+            }
           : null,
       };
     }),
@@ -235,4 +235,8 @@ export function niceString(input: string): string {
 
 export function getAngle(center: Point, p: Point) {
   return Math.atan2(p.y - center.y, p.x - center.x);
+}
+
+export function clamp(min: number = -Infinity, num: number = 0, max: number = Infinity) {
+  return Math.min(max, Math.max(min, num));
 }

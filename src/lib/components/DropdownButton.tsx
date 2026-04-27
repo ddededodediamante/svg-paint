@@ -33,8 +33,9 @@ export function DropdownButton({ label, children, flip = false }: { label: strin
         aria-haspopup="true"
         aria-expanded={open}
       >
+        {flip && (open ? "▾ " : "◂ ")}
         {label}
-        {open ? " ▾" : " ▸"}
+        {!flip && (open ? " ▾" : " ▸")}
       </button>
 
       {open && (

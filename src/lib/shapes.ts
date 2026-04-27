@@ -57,7 +57,7 @@ const tools: Record<string, ShapeTool> = {
       if (r === 0) {
         return {
           closed: true,
-          segments: [
+          segments:[
             { x: x1, y: y1 },
             { x: x2, y: y1 },
             { x: x2, y: y2 },
@@ -70,35 +70,46 @@ const tools: Record<string, ShapeTool> = {
 
       return {
         closed: true,
-        segments: [
-          { x: x1 + r, y: y1 },
-          { x: x2 - r, y: y1 },
-          {
-            x: x2,
-            y: y1 + r,
-            handleIn: { x: x2 - r * k, y: y1 },
-            handleOut: { x: x2, y: y1 + r * k },
-          },
-          { x: x2, y: y2 - r },
-          {
-            x: x2 - r,
-            y: y2,
-            handleIn: { x: x2, y: y2 - r * k },
-            handleOut: { x: x2 - r * k, y: y2 },
-          },
-          { x: x1 + r, y: y2 },
-          {
-            x: x1,
-            y: y2 - r,
-            handleIn: { x: x1 + r * k, y: y2 },
-            handleOut: { x: x1, y: y2 - r * k },
-          },
-          { x: x1, y: y1 + r },
+        segments:[
           {
             x: x1 + r,
             y: y1,
-            handleIn: { x: x1, y: y1 + r * k },
-            handleOut: { x: x1 + r * k, y: y1 },
+            handleIn: { x: x1 + r - r * k, y: y1 },
+          },
+          {
+            x: x2 - r,
+            y: y1,
+            handleOut: { x: x2 - r + r * k, y: y1 },
+          },
+          {
+            x: x2,
+            y: y1 + r,
+            handleIn: { x: x2, y: y1 + r - r * k },
+          },
+          {
+            x: x2,
+            y: y2 - r,
+            handleOut: { x: x2, y: y2 - r + r * k },
+          },
+          {
+            x: x2 - r,
+            y: y2,
+            handleIn: { x: x2 - r + r * k, y: y2 },
+          },
+          {
+            x: x1 + r,
+            y: y2,
+            handleOut: { x: x1 + r - r * k, y: y2 },
+          },
+          {
+            x: x1,
+            y: y2 - r,
+            handleIn: { x: x1, y: y2 - r + r * k },
+          },
+          {
+            x: x1,
+            y: y1 + r,
+            handleOut: { x: x1, y: y1 + r - r * k },
           },
         ],
       };

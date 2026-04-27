@@ -1,4 +1,4 @@
-import type { PathData, Point, Segment } from "./utils";
+import type { PathData, Point } from "./utils";
 
 export function cubicPoint(p0: Point, p1: Point, p2: Point, p3: Point, t: number): Point {
   const mt = 1 - t;

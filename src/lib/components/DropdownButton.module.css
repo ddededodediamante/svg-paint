@@ -13,13 +13,13 @@
 .menu button {
   border: none;
   background: none;
-  white-space: nowrap;  
-  width: 100%;         
+  white-space: nowrap;
+  width: 100%;
 }
 
 .menu button:hover {
   transform: none;
-  background-color: var(--alpha-6-background);       
+  background-color: var(--alpha-6-background);
 }
 
 .menu:not(.flip) {

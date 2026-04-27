@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import {
+  clamp,
   clonePathData,
   downloadFile,
   getAngle,
@@ -13,28 +14,7 @@ import {
 import { shapeTools } from "../lib/shapes";
 import { findClosestSegmentIndex, splitSegment } from "../lib/geometry";
 import { DropdownButton } from "./components/DropdownButton";
-
-type ToolKey = keyof typeof shapeTools;
-
-type ShapeItem = {
-  id: number;
-  fill: string;
-  stroke: string;
-  path: PathData;
-  tool?: ToolKey;
-  toolParams?: Record<string, any>;
-};
-
-type HandleSide = "in" | "out";
-
-type BoundingBox = {
-  xMin: number;
-  xMax: number;
-  yMin: number;
-  yMax: number;
-  width: number;
-  height: number;
-};
+import type { ToolKey, ShapeItem, BoundingBox, HandleSide } from "./types";
 
 function isToolMode(mode: string): mode is ToolKey {
   return mode in shapeTools;
@@ -300,7 +280,7 @@ export default function App() {
     const cos = Math.cos(delta);
     const sin = Math.sin(delta);
 
-    const newSegments = selectedShape.path.segments.map((seg, i) => {
+    const newSegments = selectedShape.path.segments.map((_, i) => {
       const orig = transformStart.path!.segments[i];
 
       function rotatePoint(p: Point): Point {
@@ -838,8 +818,8 @@ export default function App() {
         {isToolMode(mode) && shapeTools[mode].controls && (
           <div class="horizontal">
             {Object.entries(shapeTools[mode].controls!).map(([name, control]) => (
-              <label class="tool-control" key={name}>
-                <span>{niceString(name)}</span>
+              <label class="horizontal" key={name}>
+                <p>{niceString(name)}</p>
                 <input
                   type="number"
                   min={control.min}
@@ -848,6 +828,16 @@ export default function App() {
                   value={toolParams[name] ?? shapeTools[mode].defaultParams[name]}
                   onInput={e =>
                     setToolParam(name, Number((e.target as HTMLInputElement).value))
+                  }
+                  onChange={e =>
+                    setToolParam(
+                      name,
+                      clamp(
+                        control.min,
+                        Number((e.target as HTMLInputElement).value),
+                        control.max,
+                      ),
+                    )
                   }
                 />
               </label>
