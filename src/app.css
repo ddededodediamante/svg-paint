@@ -43,7 +43,8 @@ p {
 }
 
 button {
-  display: inline-flex;
+  display: flex;
+  flex-direction: row;
   width: fit-content;
   align-items: center;
   justify-content: center;
@@ -134,10 +135,6 @@ div.wrapper {
   z-index: 10;
   transition: background-color 0.2s ease;
   will-change: background-color;
-}
-
-div.wrapper:hover {
-  background: var(--alpha-8-background);
 }
 
 div.wrapper, .horizontal, .spacious {

@@ -1,0 +1,31 @@
+.menu {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 0;
+  z-index: 100;
+  gap: 4px;
+  background: var(--background);
+  border: 1px solid var(--alpha-2-dark);
+  border-radius: 8px;
+}
+
+.menu button {
+  border: none;
+  background: none;
+  white-space: nowrap;  
+  width: 100%;         
+}
+
+.menu button:hover {
+  transform: none;
+  background-color: var(--alpha-6-background);       
+}
+
+.menu:not(.flip) {
+  left: calc(100% + 4px);
+}
+
+.menu.flip {
+  right: calc(100% + 4px);
+}

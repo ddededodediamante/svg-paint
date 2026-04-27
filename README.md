@@ -1,4 +1,4 @@
 # SVG Paint
-A *work in progress* web SVG editor that's simple and quick to use.
+A *work in progress* web SVG editor that is simple and quick to use.
 
-Made with [Svelte](https://svelte.dev/).
+Made with Preact/React.
